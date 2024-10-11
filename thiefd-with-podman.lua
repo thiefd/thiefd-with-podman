@@ -1,8 +1,10 @@
 local socket = require "socket"
-local http = require "socket.http"
+local ssl = require "ssl"
+local https = require "ssl.https"
 local ltn12 = require "ltn12"
 local lanes = require "lanes".configure()
 
+-- Print ASCII Logo
 local function print_logo()
     local logo = [[
 ████████╗██╗  ██╗██╗███████╗███████╗██████╗ 
@@ -46,6 +48,9 @@ end
 local PODMAN_IMAGE
 local FORWARD_MODE = false
 local FORWARD_WEBHOOK_URL
+local SERVER_CERT = "/path/to/server.crt"
+local SERVER_KEY = "/path/to/server.key"
+local CA_CERT = "/path/to/ca.crt"
 
 local function execute_podman_command(podman_image, command)
     if not podman_image or podman_image == "" then
@@ -70,7 +75,7 @@ local function send_webhook(url, data)
     local payload = simple_json_encode({text = data})
     local response = {}
     
-    local request, code = http.request{
+    local request, code = https.request{
         url = url,
         method = "POST",
         headers = {
@@ -95,119 +100,13 @@ local function handle_async_request(podman_image, command)
     linda:send("async_results", result)
 end
 
-local function handle_request(client)
-    debug_print("Handling new request")
-    client:settimeout(15)
-    
-    local request = ""
-    while true do
-        local line, err = client:receive()
-        if err then
-            error_print("Failed to receive request: " .. err)
-            client:close()
-            return
-        end
-        request = request .. line .. "\r\n"
-        if line == "" then break end
-    end
-    
-    debug_print("Received request headers:\n" .. request)
-    
-    local method, path = request:match("(%u+) (/%S*) HTTP/[%d.]+")
-    
-    if not method or not path then
-        error_print("Invalid request received")
-        client:send("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nInvalid Request")
-        client:close()
-        return
-    end
-    
-    local content_length = tonumber(request:match("Content%-Length: (%d+)"))
-    local body = ""
-    if content_length then
-        body, err = client:receive(content_length)
-        if err then
-            error_print("Failed to receive request body: " .. err)
-            client:close()
-            return
-        end
-    end
-    
-    debug_print("Received request body: '" .. body .. "'")
-    
-    if method == "POST" and path == "/thiefd" then
-        debug_print("Processing POST /thiefd request")
-        
-        if not body or body == "" then
-            debug_print("Bad request: missing command")
-            client:send("HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\n\r\nCommand is required")
-        else
-            local command, webhook_url = body:match("^(.-)\n(.+)$")
-            if not command then
-                command = body
-            end
-            command = command:gsub("^%s*(.-)%s*$", "%1")
-            local is_async = command:match("^async") ~= nil
-            if is_async then
-                command = command:gsub("^async%s*", "")
-            end
-            
-            debug_print("Processed command: '" .. command .. "', Async: " .. tostring(is_async) .. ", Webhook: " .. (webhook_url or "None"))
-            
-            if FORWARD_MODE or is_async then
-                client:send("HTTP/1.1 202 Accepted\r\nContent-Type: text/plain\r\n\r\nRequest accepted for processing")
-                client:close()
-                lanes.gen("*", handle_async_request)(PODMAN_IMAGE, command)
-                
-                local _, result = linda:receive("async_results")
-                
-                local webhook_to_use = FORWARD_MODE and FORWARD_WEBHOOK_URL or webhook_url
-                send_webhook(webhook_to_use, "thiefd command results:\n" .. result)
-            else
-                local result = execute_podman_command(PODMAN_IMAGE, command)
-                client:send("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n" .. result)
-            end
-        end
-    else
-        debug_print("Not found: " .. method .. " " .. path)
-        client:send("HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\n\r\nNot Found")
-    end
-    
-    debug_print("Closing client connection")
-    client:close()
-end
-
--- Main function
-local function main()
-    print_logo()
-    if arg[1] == "--forward" and arg[2] then
-        FORWARD_MODE = true
-        FORWARD_WEBHOOK_URL = arg[2]
-        print("Running in forward mode. All requests will be sent to: " .. FORWARD_WEBHOOK_URL)
-    else
-        print("Running in normal mode.")
-    end
-
-    print("Enter the Podman image name to use:")
-    PODMAN_IMAGE = io.read()
-    
-    local server = assert(socket.bind("0.0.0.0", 8080))
-    debug_print("Server listening on port 8080...")
-
-    while true do
-        debug_print("Waiting for new connection...")
-        local client, err = server:accept()
-        if client then
-            debug_print("New connection accepted")
-            local ok, err = pcall(handle_request, client)
-            if not ok then
-                error_print("Error handling request: " .. tostring(err))
-            end
-        else
-            error_print("Failed to accept connection: " .. tostring(err))
-        end
-    end
-end
-
--- Run the main function
-main()
+local function create_https_server(port)
+    local server = assert(socket.bind("0.0.0.0", port))
+    local ctx = assert(ssl.newcontext({
+        mode = "server",
+        protocol = "any",
+        key = SERVER_KEY,
+        certificate = SERVER_CERT,
+        cafile = CA_CERT,
+        verify = {"peer", "fail_if_no_peer_cert"},
+        options = {"all", "no_sslv2", "
