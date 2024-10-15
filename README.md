@@ -1,109 +1,110 @@
-# Thiefd with Podman
+# Thiefd, Functions-as-a-Service in Lua with Podman
 
-This README provides step-by-step instructions for setting up and running the `thiefd-with-podman.lua` script, which creates a REST API for executing Podman commands with mutual TLS authentication.
+This README provides step-by-step instructions for setting up and running THIEFD, an open-source function-as-a-service framework written in Lua, using Podman instead of Docker.
 
 ## Prerequisites
 
-Before you begin, ensure you have the following installed on your system:
+- Ubuntu-based system (for apt-get commands)
+- Sudo access
+- Podman installed and configured
 
-1. **Lua**: Version 5.1 or later
-2. **LuaRocks**: The package manager for Lua
-3. **OpenSSL**: For generating TLS certificates
-4. **Podman**: For running containerized commands
+## Installation Steps
 
-## Step 1: Install Podman
-
-If you don't have Podman installed, follow these steps:
-
-1. Visit the official Podman website: https://podman.io/getting-started/installation
-2. Choose your operating system and follow the installation instructions.
-3. After installation, verify Podman is working by running:
+1. Install Lua and required system dependencies:
    ```
-   podman --version
+   sudo apt-get update
+   sudo apt-get install -y lua5.3 liblua5.3-dev luarocks build-essential libssl-dev
    ```
 
-## Step 2: Install Lua and LuaRocks
-
-Install Lua and LuaRocks using your system's package manager. For example, on Fedora or CentOS:
-
-```bash
-sudo dnf install lua luarocks
-```
-
-On Ubuntu or Debian:
-
-```bash
-sudo apt-get update
-sudo apt-get install lua5.3 luarocks
-```
-
-## Step 3: Install Lua Dependencies
-
-Install the required Lua libraries using LuaRocks:
-
-```bash
-sudo luarocks install luasocket
-sudo luarocks install luasec
-sudo luarocks install lanes
-```
-
-## Step 4: Install OpenSSL
-
-OpenSSL is usually pre-installed on most systems. If it's not, install it using your system's package manager. For example, on Fedora or CentOS:
-
-```bash
-sudo dnf install openssl
-```
-
-On Ubuntu or Debian:
-
-```bash
-sudo apt-get install openssl
-```
-
-## Step 5: Prepare the Script
-
-1. Save the `thiefd-with-podman.lua` script to your desired location.
-2. Make sure the script has execute permissions:
-   ```bash
-   chmod +x thiefd-with-podman.lua
+2. Install Lua dependencies using LuaRocks:
+   ```
+   sudo luarocks install luasocket
+   sudo luarocks install luasec
+   sudo luarocks install lanes
+   sudo luarocks install luafilesystem
    ```
 
-## Step 6: Run the Script
+3. Install Certbot for SSL certificate management:
+   ```
+   sudo apt-get install -y certbot
+   ```
 
-Run the script using the following command:
+4. Set up the required environment variables:
+   ```
+   export THIEFD_FORWARD_MODE=false
+   export THIEFD_PODMAN_IMAGE="your-podman-image-name"
+   export THIEFD_API_USERNAME="your-api-username"
+   export THIEFD_API_PASSWORD="your-api-password"
+   export THIEFD_SERVER_PORT=443
+   export THIEFD_DOMAIN="your-domain.com"
+   export THIEFD_EMAIL="your-email@example.com"
+   export THIEFD_CUSTOM_ENDPOINT="/thiefd"  # Optional: Set custom endpoint
+   ```
+   Replace the placeholder values with your actual configuration.
 
-```bash
-lua thiefd-with-podman.lua <port> [--forward <webhook_url>]
-```
+   Optional: If you want to use forward mode, also set:
+   ```
+   export THIEFD_FORWARD_MODE=true
+   export THIEFD_FORWARD_WEBHOOK_URL="https://your-webhook-url.com"
+   ```
 
-Replace `<port>` with the desired port number for the HTTPS server. The `--forward` option is optional and can be used to specify a webhook URL for forwarding results.
+5. Save the Lua script to a file named `thiefd.lua`.
 
-## Step 7: Follow the Prompts
+## Running the Script
 
-1. The script will ask if you want to generate new TLS certificates. Enter 'y' if you need to create new certificates, or 'n' if you already have certificates.
+1. Make sure you have root privileges to bind to port 443:
+   ```
+   sudo -E lua thiefd.lua
+   ```
+   The `-E` flag ensures that your environment variables are passed to the sudo environment.
 
-2. If generating new certificates, you'll be prompted to enter:
-   - Common Name for the CA
-   - Common Name for the server certificate
-   - Common Name for the client certificate
+2. The script will automatically attempt to obtain or renew a Let's Encrypt SSL certificate for your domain.
 
-3. Enter the Podman image name you want to use for executing commands.
+3. Once running, the server will listen for HTTPS requests on the specified port (default 443).
 
-## Step 8: Use the API
+## Usage
 
-Once the server is running, you can send HTTPS POST requests to `https://your-server:port/thiefd` with the following:
-
-- A valid client certificate for authentication
-- The command to execute in the request body
+Send POST requests to `https://your-domain.com{CUSTOM_ENDPOINT}` with the following:
+- Basic Authentication using the API username and password
+- Request body containing the Podman command to execute
 
 Example using curl:
-
-```bash
-curl -X POST \
-     --cert client.crt \
-     --key client.key \
-     --cacert ca.crt \
-     -d "your_podman_command_here" \
-     https://your-server:port/thiefd
 ```
+curl -X POST -u "your-api-username:your-api-password" \
+     -d "your podman command here" \
+     https://your-domain.com/thiefd
+```
+
+Note: Replace `/thiefd` with your custom endpoint if you've set the `THIEFD_CUSTOM_ENDPOINT` environment variable.
+
+## Custom Endpoint
+
+You can set a custom endpoint for your THIEFD server:
+
+1. Set the `THIEFD_CUSTOM_ENDPOINT` environment variable before running the script:
+   ```
+   export THIEFD_CUSTOM_ENDPOINT="/your-custom-endpoint"
+   ```
+
+2. If not set, the default endpoint `/thiefd` will be used.
+
+3. Use your custom endpoint when sending requests to the server.
+
+## Security Considerations
+
+- Ensure your server is properly secured, as this script allows remote execution of Podman commands.
+- Use strong, unique credentials for the API username and password.
+- Regularly update and patch your system and all dependencies.
+- Monitor logs and access to the server.
+- Choose a non-obvious custom endpoint to add an extra layer of security.
+
+## Troubleshooting
+
+- If you encounter permission issues, ensure you're running the script with appropriate privileges.
+- Check that all required environment variables are correctly set.
+- Verify that your domain's DNS is properly configured to point to your server's IP address.
+- Ensure that port 443 is open and accessible from the internet.
+- If you're using a custom endpoint and can't connect, double-check that you're using the correct endpoint in your requests.
+- If Podman commands fail, ensure that Podman is properly installed and configured on your system.
+
+For any issues or questions, please contact me[at]thiefd.com.
