@@ -94,15 +94,15 @@ You can set a custom endpoint for your THIEFD server:
 
 To use the install script:
 
-Save it to a file, e.g., install_thiefd.sh.
-Make it executable: chmod +x install_thiefd.sh.
-Run it with sudo: sudo ./install_thiefd.sh.
+1. Save it to a file, e.g., `install_thiefd.sh`.
+2. Make it executable: `chmod +x install_thiefd.sh`.
+3. Run it with sudo: `sudo ./install_thiefd.sh`.
 
 After running the script, you'll need to:
 
-Edit the configuration file at /etc/thiefd.conf with your specific settings.
-Start the THIEFD service using sudo systemctl start thiefd.
-Enable THIEFD to start on boot with sudo systemctl enable thiefd.
+1. Edit the configuration file at `/etc/thiefd.conf` with your specific settings.
+2. Start the THIEFD service using `sudo systemctl start thiefd`.
+3. Enable THIEFD to start on boot with `sudo systemctl enable thiefd`.
 
 Remember to replace the placeholder URL in the script where it downloads thiefd.lua with the location of a secure repository containing the thiefd-with-podman.lua script.
 
