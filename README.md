@@ -32,7 +32,7 @@ This README provides step-by-step instructions for setting up and running THIEFD
 4. Set up the required environment variables:
    ```
    export THIEFD_FORWARD_MODE=false
-   export THIEFD_PODMAN_IMAGE="your-podman-image-name"
+   export THIEFD_PODMAN_IMAGE="fully-qualified-container-url (e.g. docker.io/registry/image:latest)"
    export THIEFD_API_USERNAME="your-api-username"
    export THIEFD_API_PASSWORD="your-api-password"
    export THIEFD_SERVER_PORT=443
