@@ -301,3 +301,41 @@ local function main()
 
     local cert_file, key_file = issue_letsencrypt_cert(domain, email)
     if not cert_file or not key_file then
+        error_print("Failed to issue/renew Let's Encrypt certificate. Exiting.")
+        os.exit(1)
+    end
+
+    local params = {
+        mode = "server",
+        protocol = "any",
+        key = key_file,
+        certificate = cert_file,
+        cafile = cert_file,
+        verify = {"none"},
+        options = {"all", "no_sslv2", "no_sslv3", "no_tlsv1"},
+    }
+
+    local server = assert(socket.bind("0.0.0.0", SERVER_PORT))
+    debug_print("Server listening on port " .. SERVER_PORT .. " (HTTPS)...")
+
+    while true do
+        debug_print("Waiting for new connection...")
+        local client, err = server:accept()
+        if client then
+            debug_print("New connection accepted")
+            local ssl_client = assert(ssl.wrap(client, params))
+            ssl_client:dohandshake()
+            local ok, err = pcall(function()
+                handle_request(ssl_client, CUSTOM_ENDPOINT)
+            end)
+            if not ok then
+                error_print("Error handling request: " .. tostring(err))
+            end
+        else
+            error_print("Failed to accept connection: " .. tostring(err))
+        end
+    end
+end
+
+-- Run the main function
+main()
