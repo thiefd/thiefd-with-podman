@@ -4,7 +4,7 @@ local ltn12 = require "ltn12"
 local lanes = require "lanes".configure()
 local ssl = require "ssl"
 local lfs = require "lfs"
-local jwt = require "luajwt"  -- New requirement for JWT handling
+local jwt = require "resty.jwt"  -- New requirement for JWT
 
 local function print_logo()
     local logo = [[
@@ -50,7 +50,7 @@ end
 local PODMAN_IMAGE
 local FORWARD_MODE = false
 local FORWARD_WEBHOOK_URL
-local JWT_SECRET
+local JWT_SECRET  -- New variable for JWT secret
 local SERVER_PORT
 
 local function check_certbot_installed()
@@ -140,12 +140,18 @@ local function handle_async_request(podman_image, command)
 end
 
 local function verify_jwt(token)
-    local payload, err = jwt.decode(token, JWT_SECRET, true)
-    if err then
-        error_print("JWT verification failed: " .. err)
-        return nil
+    if not token then
+        return false, "No token provided"
     end
-    return payload
+
+    local jwt_obj = jwt:verify(JWT_SECRET, token)
+    if not jwt_obj.verified then
+        return false, "Invalid token"
+    end
+
+    -- You can add additional checks here, like expiration time or specific claims
+
+    return true, nil
 end
 
 local function handle_request(client, custom_endpoint)
@@ -175,17 +181,17 @@ local function handle_request(client, custom_endpoint)
         return
     end
     
-    -- Check authentication
-    local auth_header = request:match("Authorization: Bearer ([%w%-_%.]+)")
+    -- Check JWT authentication
+    local auth_header = request:match("Authorization: Bearer (%S+)")
     if not auth_header then
         client:send("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Bearer\r\nContent-Type: text/plain\r\n\r\nAuthentication required")
         client:close()
         return
     end
     
-    local payload = verify_jwt(auth_header)
-    if not payload then
-        client:send("HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\nInvalid token")
+    local is_valid, err = verify_jwt(auth_header)
+    if not is_valid then
+        client:send("HTTP/1.1 401 Unauthorized\r\nContent-Type: text/plain\r\n\r\n" .. (err or "Invalid token"))
         client:close()
         return
     end
@@ -253,7 +259,7 @@ local function main()
     FORWARD_MODE = os.getenv("THIEFD_FORWARD_MODE") == "true"
     FORWARD_WEBHOOK_URL = os.getenv("THIEFD_FORWARD_WEBHOOK_URL")
     PODMAN_IMAGE = os.getenv("THIEFD_PODMAN_IMAGE")
-    JWT_SECRET = os.getenv("THIEFD_JWT_SECRET")
+    JWT_SECRET = os.getenv("THIEFD_JWT_SECRET")  -- New environment variable for JWT secret
     SERVER_PORT = tonumber(os.getenv("THIEFD_SERVER_PORT")) or 443
     local domain = os.getenv("THIEFD_DOMAIN")
     local email = os.getenv("THIEFD_EMAIL")
@@ -295,41 +301,3 @@ local function main()
 
     local cert_file, key_file = issue_letsencrypt_cert(domain, email)
     if not cert_file or not key_file then
-        error_print("Failed to issue/renew Let's Encrypt certificate. Exiting.")
-        os.exit(1)
-    end
-
-    local params = {
-        mode = "server",
-        protocol = "any",
-        key = key_file,
-        certificate = cert_file,
-        cafile = cert_file,
-        verify = {"none"},
-        options = {"all", "no_sslv2", "no_sslv3", "no_tlsv1"},
-    }
-
-    local server = assert(socket.bind("0.0.0.0", SERVER_PORT))
-    debug_print("Server listening on port " .. SERVER_PORT .. " (HTTPS)...")
-
-    while true do
-        debug_print("Waiting for new connection...")
-        local client, err = server:accept()
-        if client then
-            debug_print("New connection accepted")
-            local ssl_client = assert(ssl.wrap(client, params))
-            ssl_client:dohandshake()
-            local ok, err = pcall(function()
-                handle_request(ssl_client, CUSTOM_ENDPOINT)
-            end)
-            if not ok then
-                error_print("Error handling request: " .. tostring(err))
-            end
-        else
-            error_print("Failed to accept connection: " .. tostring(err))
-        end
-    end
-end
-
--- Run the main function
-main()
